@@ -1,10 +1,10 @@
-name: Docker Image CI
+name: Push to Heroku (Docker Build)
 
 on:
   push:
-    branches: [ master ]
+    branches: [ main ]
   pull_request:
-    branches: [ master ]
+    branches: [ main ]
   schedule:
     - cron: "0 0 * * 0" #Set a cron job to run every sunday (usually to pull any new updates)
 
