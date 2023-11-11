@@ -1,0 +1,47 @@
+name: Code Compilation Tests
+
+on:
+  pull_request:
+    branches: [ master, main, development ]
+    paths-ignore:
+      - '.github/**'
+  workflow_dispatch:
+
+jobs:
+  Compilation-Tests:
+    runs-on: ubuntu-latest
+    name: Compilation Tests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+      - name: Build Django Stack from Docker Compose
+        run: docker-compose build django
+      - name: Run Django
+        run: docker-compose up -d django
+      - name: Test Django Migrations
+        run: |
+          echo "Sleeping for 30 seconds..."
+          sleep 30
+          echo "Sleep is over. Running migrations..."
+          docker-compose exec -T django python manage.py makemigrations
+          docker-compose exec -T django python manage.py migrate
+          exit_code=$(docker inspect django --format='{{.State.ExitCode}}')
+          if [ "$exit_code" != "0" ]; then exit $exit_code; fi
+      - name: Shutdown Django Stack
+        run: |
+            docker-compose down
+            docker system prune -af --volumes
+      - name: Save logs from containers
+        run: |
+          docker-compose logs > logs.txt
+      - name: Upload Docker Compose logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: "compile-docker-container-${{ github.sha }}"
+          path: logs.txt
+          retention-days: 7
