@@ -1,0 +1,56 @@
+name: Update EC2 Security Group to CloudFlare IP Ranges
+
+on:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 0 * * 0" # Runs at 00:00 every Sunday
+  workflow_dispatch:
+
+jobs:
+  DEV-Update-EC2-Security-Group-With-CloudFlare-IPs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Setup AWS CLI
+        uses: aws-actions/configure-aws-credentials@v1
+        with:
+          aws-access-key-id: ${{ secrets.AWS_DEV_ACCESS_KEY }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: us-east-1
+
+      - name: Pull CloudFlare IP Ranges
+        run: |
+          curl https://www.cloudflare.com/ips-v4 -o ips-v4.txt
+          curl https://www.cloudflare.com/ips-v6 -o ips-v6.txt
+
+      - name: Update AWS Security Group
+        env:
+          SECURITY_GROUP_ID: ${{ secrets.AWS_SECURITY_GROUP_ID }}
+        run: |
+          # Fetching current ingress rules for ports 80 and 443
+          aws ec2 describe-security-groups --group-id $SECURITY_GROUP_ID --output json > current-sg-rules.json
+
+          # Extract IP ranges for port 80 and revoke them
+          cat current-sg-rules.json | jq -r '.SecurityGroups[0].IpPermissions[] | select(.FromPort==80 and .ToPort==80) | .IpRanges[] | .CidrIp' | while read -r ip; do
+          aws ec2 revoke-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 80 --cidr "$ip"
+          done
+
+          # Extract IP ranges for port 443 and revoke them
+          cat current-sg-rules.json | jq -r '.SecurityGroups[0].IpPermissions[] | select(.FromPort==443 and .ToPort==443) | .IpRanges[] | .CidrIp' | while read -r ip; do
+          aws ec2 revoke-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 443 --cidr "$ip"
+          done
+
+            # Adding new IPv4 rules from CloudFlare IP ranges
+          cat ips-v4.txt | while read -r ip; do
+            aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 80 --cidr $ip
+            aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --protocol tcp --port 443 --cidr $ip
+          done
+
+            # Adding new IPv6 rules from CloudFlare IP ranges
+          cat ips-v6.txt | while read -r ip; do
+            trimmed_ip=$(echo "$ip" | sed 's/[[:space:]]*$//')
+            aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --ip-permissions IpProtocol=tcp,FromPort=80,ToPort=80,Ipv6Ranges="[{CidrIpv6=$trimmed_ip}]"
+            aws ec2 authorize-security-group-ingress --group-id $SECURITY_GROUP_ID --ip-permissions IpProtocol=tcp,FromPort=443,ToPort=443,Ipv6Ranges="[{CidrIpv6=$trimmed_ip}]"
+          done
