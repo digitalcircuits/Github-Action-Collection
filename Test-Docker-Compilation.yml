@@ -1,0 +1,51 @@
+name: Code Compilation Tests
+
+on:
+  pull_request:
+    branches: [ master, main, development ]
+    paths-ignore:
+      - '.github/**'
+  workflow_dispatch:
+
+jobs:
+  Compilation-Tests:
+    runs-on: ubuntu-latest
+    name: Compilation Tests
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v3
+      - name: Install Docker Compose
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y docker-compose
+      - name: Build containers with Docker Compose
+        run: |
+          docker-compose build
+      - name: Test Docker Containers
+        run: |
+          docker-compose up -d
+          echo "Sleeping for 120 seconds... After this, we will see which containers have exited unexpectedly."
+          sleep 120
+          echo "Sleep is over. Checking for exited containers..."
+          exited_containers=$(docker ps -a -f status=exited -q)
+          if [ "$exited_containers" ]; then
+            echo "One or more containers have failed. Details are as follows:"
+            docker ps -a -f status=exited
+            exit 1
+          else
+            echo "All containers seem to have started successfully."
+          fi
+      - name: Shutdown and remove all containers
+        run: |
+            docker-compose down
+            docker system prune -af --volumes
+      - name: Save logs from containers
+        run: |
+          docker-compose logs > logs.txt
+      - name: Upload Docker Compose logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: "compile-docker-container-${{ github.sha }}"
+          path: logs.txt
+          retention-days: 7
